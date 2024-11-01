@@ -13,6 +13,8 @@ strategy = "bluegreen"
 [env]
 NODE_ENV = "production"
 PORT = "8080"
+ENABLE_PREMIUM_FEATURES = "false"
+DISABLE_SSO = "true"
 
 [[services.ports]]
 handlers = ["http"]
