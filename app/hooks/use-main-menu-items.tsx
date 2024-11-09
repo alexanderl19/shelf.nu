@@ -1,9 +1,9 @@
 import Icon from "~/components/icons/icon";
-import { useUserData } from "./use-user-data";
+// import { useUserData } from "./use-user-data";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 export function useMainMenuItems() {
-  const user = useUserData();
+  // const user = useUserData();
   const { isBaseOrSelfService } = useUserRoleHelper();
 
   let menuItemsTop = [
@@ -54,15 +54,15 @@ export function useMainMenuItems() {
     },
   ];
   let menuItemsBottom = [
-    {
-      icon: <Icon icon="asset-label" />,
-      to: `https://www.shelf.nu/order-tags?email=${user?.email}${
-        user?.firstName ? `&firstName=${user.firstName}` : ""
-      }${user?.lastName ? `&lastName=${user.lastName}` : ""}`,
-      title: "Asset labels",
-      target: "_blank",
-      isNew: true,
-    },
+    // {
+    //   icon: <Icon icon="asset-label" />,
+    //   to: `https://www.shelf.nu/order-tags?email=${user?.email}${
+    //     user?.firstName ? `&firstName=${user.firstName}` : ""
+    //   }${user?.lastName ? `&lastName=${user.lastName}` : ""}`,
+    //   title: "Asset labels",
+    //   target: "_blank",
+    //   isNew: true,
+    // },
     {
       icon: <Icon icon="scanQR" />,
       to: "scanner",

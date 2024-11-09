@@ -3,11 +3,11 @@ import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
-import { ClientOnly } from "remix-utils/client-only";
+// import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
-import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
+// import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";
@@ -135,12 +135,12 @@ export default function App() {
     useLoaderData<typeof loader>();
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
-  const renderInstallPwaPromptOnMobile = () =>
-    // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
-    window.matchMedia("(max-width: 640px)").matches &&
-    !window.matchMedia("(display-mode: standalone)").matches ? (
-      <InstallPwaPromptModal />
-    ) : null;
+  // const renderInstallPwaPromptOnMobile = () =>
+  //   // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
+  //   window.matchMedia("(max-width: 640px)").matches &&
+  //   !window.matchMedia("(display-mode: standalone)").matches ? (
+  //     <InstallPwaPromptModal />
+  //   ) : null;
 
   return (
     <>
@@ -165,9 +165,9 @@ export default function App() {
               )}
             </div>
             <Toaster />
-            <ClientOnly fallback={null}>
+            {/* <ClientOnly fallback={null}>
               {renderInstallPwaPromptOnMobile}
-            </ClientOnly>
+            </ClientOnly> */}
           </main>
         </div>
       </div>

@@ -5,7 +5,7 @@ import {
   useLocation,
   useMatches,
 } from "@remix-run/react";
-import { motion } from "framer-motion";
+// import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import Icon from "~/components/icons/icon";
@@ -16,7 +16,7 @@ import { useMainMenuItems } from "~/hooks/use-main-menu-items";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils/tw";
 import { toggleMobileNavAtom } from "./atoms";
-import { SidebarNoticeCard } from "./notice-card";
+// import { SidebarNoticeCard } from "./notice-card";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
@@ -142,7 +142,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
 
         <div className="lower-menu">
           {/* Sidebar notice card component will be visible when uncollapsed sidebar is selected and hidden when minimizing sidebar form is processing */}
-          {fetcher.state == "idle" ? (
+          {/* {fetcher.state == "idle" ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -150,7 +150,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
             >
               <SidebarNoticeCard />
             </motion.div>
-          ) : null}
+          ) : null} */}
           <ul className="menu mb-6">
             {menuItemsBottom.map((item) => (
               <li key={item.title}>
@@ -168,7 +168,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
                   onClick={toggleMobileNav}
                   title={item.title}
-                  target={item?.target || undefined}
+                  // target={item?.target || undefined}
                 >
                   <i className="icon inline-flex pl-[2px] text-gray-500">
                     {item.icon}
@@ -176,11 +176,11 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     {item.title}
                   </span>
-                  <When truthy={item.isNew || false}>
+                  {/* <When truthy={item.isNew || false}>
                     <span className="ml-auto rounded-lg bg-primary-50 px-2 py-1 text-xs text-primary-600">
                       New
                     </span>
-                  </When>
+                  </When> */}
                 </NavLink>
               </li>
             ))}
