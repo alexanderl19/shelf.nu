@@ -64,14 +64,14 @@ export default function Sidebar() {
         id="main-navigation"
         ref={mainNavigationRef}
         className={tw(
-          `main-navigation fixed top-0 z-30 flex h-screen max-h-screen flex-col border-r border-gray-200 bg-white p-4 shadow-[0px_20px_24px_-4px_rgba(16,24,40,0.08),_0px_8px_8px_-4px_rgba(16,24,40,0.03)] transition-all duration-100 ease-linear md:sticky md:left-0 md:px-4 md:py-8 md:shadow-none md:duration-100`,
+          `main-navigation fixed top-0 z-30 flex h-screen max-h-screen flex-col border-r border-gray-200 bg-white p-4 shadow-[0px_20px_24px_-4px_rgba(16,24,40,0.08),_0px_8px_8px_-4px_rgba(16,24,40,0.03)] transition-all duration-100 ease-linear md:sticky md:left-0 md:py-4 md:pl-2 md:pr-0 md:shadow-none md:duration-100`,
           optimisticMinimizedSidebar
             ? "collapsed-navigation md:w-[82px] md:overflow-hidden"
             : "md:left-0 md:w-[312px]",
           isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "-left-full"
         )}
       >
-        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden md:pr-2">
           <div className="navigation-header flex items-center justify-between">
             <Link
               to="."
@@ -90,7 +90,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <div className={tw("", workspaceSwitching ? "opacity-50" : "")}>
+        <div className={tw("md:pr-2", workspaceSwitching ? "opacity-50" : "")}>
           <SidebarBottom user={user} />
         </div>
       </aside>
