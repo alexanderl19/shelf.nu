@@ -17,7 +17,7 @@ export function isQrId(id: string): boolean {
    * - The path should only have small letters and optional number
    * - The path's length should fit within the allowed character lengths(10 for new and 25 for legacy QR codes)
    */
-  const regex = /^[a-z][a-z0-9]*$/;
+  const regex = /^[a-z0-9]*$/;
 
   // Validate the ID against the criteria
   if (
