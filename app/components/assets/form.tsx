@@ -12,6 +12,7 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
+import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
@@ -195,7 +196,7 @@ export const AssetForm = ({
               </p>
               <Input
                 disabled={disabled}
-                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                accept={ACCEPT_SUPPORTED_IMAGES}
                 name="mainImage"
                 type="file"
                 onChange={validateFile}
@@ -256,6 +257,7 @@ export const AssetForm = ({
             disabled={disabled}
             defaultValue={category ?? undefined}
             model={{ name: "category", queryKey: "name" }}
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
             contentLabel="Categories"
             label="Category"
             hideLabel
@@ -321,6 +323,7 @@ export const AssetForm = ({
             disabled={disabled}
             selectionMode="set"
             fieldName="newLocationId"
+            triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
             defaultValue={location || undefined}
             model={{ name: "location", queryKey: "name" }}
             contentLabel="Locations"

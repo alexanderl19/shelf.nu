@@ -62,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, userOrganizations } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.location,
@@ -80,10 +80,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
+      userOrganizations,
+      request,
     });
 
     const totalItems = totalAssetsWithinLocation;
-    const totalPages = totalAssetsWithinLocation / perPage;
+    const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
     const header: HeaderData = {
       title: location.name,
@@ -358,5 +360,3 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
-
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;

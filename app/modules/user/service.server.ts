@@ -1,5 +1,5 @@
-import type { Organization, User } from "@prisma/client";
-import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
+import type { Organization, User, UserOrganization } from "@prisma/client";
+import { OrganizationRoles, Prisma, Roles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
@@ -10,17 +10,18 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
 import { sendEmail } from "~/emails/mail.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
-  deleteAuthAccount,
   createEmailAuthAccount,
+  deleteAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, isLikeShelfError } from "~/utils/error";
-import type { ValidationError } from "~/utils/http";
+import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import { getRedirectUrlFromRequest, type ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
@@ -32,8 +33,9 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
+import type { MergeInclude } from "~/utils/utils";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
-import type { UpdateUserPayload } from "./types";
+import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
@@ -517,7 +519,7 @@ export async function createUser(
 
   /**
    * We only create a personal org if the signup is not disabled
-   * */
+   */
   const shouldCreatePersonalOrg = !config.disableSignup;
 
   try {
@@ -630,7 +632,7 @@ export async function updateUser<T extends Prisma.UserInclude>(
   /**
    * Remove password from object so we can pass it to prisma user update
    * Also we remove the email as we dont allow it to be changed for now
-   * */
+   */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
     updateUserPayload
@@ -691,6 +693,72 @@ export async function updateUser<T extends Prisma.UserInclude>(
       additionalData: { ...cleanClone, validationErrors },
       label,
       shouldBeCaptured: !isUniqueViolation,
+    });
+  }
+}
+
+/**
+ * Updates user email in both the auth and shelf databases
+ * If for some reason the user update fails we should also revenrt the auth account update
+ */
+export async function updateUserEmail({
+  userId,
+  currentEmail,
+  newEmail,
+}: {
+  userId: User["id"];
+  currentEmail: User["email"];
+  newEmail: string;
+}) {
+  try {
+    /**
+     * Update the user in supabase auth
+     */
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(
+      userId,
+      {
+        email: newEmail,
+      }
+    );
+
+    if (error) {
+      throw new ShelfError({
+        cause: error,
+        message:
+          "Failed to update email in auth. Please try again and if the issue persists, contact support",
+        additionalData: { userId, newEmail, currentEmail },
+        label,
+      });
+    }
+
+    /** Update the user in the DB */
+    const updatedUser = await db.user
+      .update({
+        where: { id: userId },
+        data: { email: newEmail },
+      })
+      .catch((cause) => {
+        // On failure, revert the change of the user update in auth
+        void getSupabaseAdmin().auth.admin.updateUserById(userId, {
+          email: currentEmail,
+        });
+
+        // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
+        throw new ShelfError({
+          cause,
+          message: "Failed to update email in shelf",
+          additionalData: { userId, newEmail, currentEmail },
+          label,
+        });
+      });
+
+    return updatedUser;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update email",
+      additionalData: { userId, currentEmail, newEmail },
+      label,
     });
   }
 }
@@ -895,7 +963,7 @@ export async function softDeleteUser(id: User["id"]) {
         }
         /**
          * Remove the user from all organizations the user belongs to but doesnt own.
-         * */
+         */
         await revokeAccessToOrganization({
           userId: id,
           organizationId: userOrg.organizationId,
@@ -922,7 +990,7 @@ export async function softDeleteUser(id: User["id"]) {
      *
      * Note: This happens outside of the transaction because we dont want to rollback the deletion of the user if the deletion of the picture fails
      * If it fails for some reason, we will get it in our logs that there was an issue so we can check it manually
-     * */
+     */
     if (user.profilePicture) {
       await deleteProfilePicture({ url: user.profilePicture });
     }
@@ -1170,4 +1238,107 @@ export async function transferEntitiesToNewOwner({
       createdById: newOwnerId,
     },
   });
+}
+
+type UserWithExtraInclude<T extends Prisma.UserInclude | undefined> =
+  T extends Prisma.UserInclude
+    ? Prisma.UserGetPayload<{
+        include: MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+      }>
+    : Prisma.UserGetPayload<{ include: typeof USER_STATIC_INCLUDE }>;
+
+export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
+  id,
+  organizationId,
+  userOrganizations,
+  request,
+  extraInclude,
+}: Pick<User, "id"> & {
+  organizationId: Organization["id"];
+  userOrganizations?: Pick<UserOrganization, "organizationId">[];
+  request?: Request;
+  extraInclude?: T;
+}) {
+  try {
+    const otherOrganizationIds = userOrganizations?.map(
+      (org) => org.organizationId
+    );
+
+    const mergedInclude = {
+      ...USER_STATIC_INCLUDE,
+      ...extraInclude,
+    } as MergeInclude<typeof USER_STATIC_INCLUDE, T>;
+
+    const user = (await db.user.findFirstOrThrow({
+      where: {
+        OR: [
+          { id, userOrganizations: { some: { organizationId } } },
+          ...(userOrganizations?.length
+            ? [
+                {
+                  id,
+                  userOrganizations: {
+                    some: { organizationId: { in: otherOrganizationIds } },
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+      include: mergedInclude,
+    })) as UserWithExtraInclude<T>;
+
+    /* User is accessing the User in the wrong organization */
+    const isUserInCurrentOrg = !!user.userOrganizations.find(
+      (userOrg) => userOrg.organizationId === organizationId
+    );
+
+    const otherOrgsForUser =
+      userOrganizations?.filter(
+        (org) =>
+          !!user.userOrganizations.find(
+            (userOrg) => userOrg.organizationId === org.organizationId
+          )
+      ) ?? [];
+
+    if (
+      userOrganizations?.length &&
+      !isUserInCurrentOrg &&
+      otherOrgsForUser?.length
+    ) {
+      const redirectTo =
+        typeof request !== "undefined"
+          ? getRedirectUrlFromRequest(request)
+          : undefined;
+
+      throw new ShelfError({
+        cause: null,
+        title: "User not found",
+        message: "",
+        additionalData: {
+          model: "teamMember",
+          organizations: otherOrgsForUser,
+          redirectTo,
+        },
+        label,
+        status: 404,
+      });
+    }
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "User not found.",
+      message:
+        "The user you are trying to access does not exists or you do not have permission to access it.",
+      additionalData: {
+        id,
+        organizationId,
+        ...(isLikeShelfError(cause) ? cause.additionalData : {}),
+      },
+      label,
+      shouldBeCaptured: !isNotFoundError(cause),
+    });
+  }
 }

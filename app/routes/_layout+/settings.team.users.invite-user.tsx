@@ -112,6 +112,24 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       }
     }
 
+    const existingInvites = await db.invite.findMany({
+      where: {
+        status: "PENDING",
+        inviteeEmail: email,
+        organizationId,
+      },
+    });
+
+    if (existingInvites.length) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "User already has a pending invite. Either resend it or cancel it in order to be able to send a new one.",
+        additionalData: { email, organizationId },
+        label: "Invite",
+      });
+    }
+
     const invite = await createInvite({
       organizationId,
       inviteeEmail: email,
@@ -253,15 +271,13 @@ export default function InviteUser() {
               required
             />
           </div>
-          <WarningBox className="">
-            <>
-              <strong>IMPORTANT</strong>: User invite emails contain a link with
-              a unique token that expires after being consumed. Please make sure
-              to add the <span className="font-medium">shelf.nu domain</span> to
-              your email whitelist to ensure the email is delivered and the link
-              is not consumed by your anti-spam software.
-            </>
-          </WarningBox>
+
+          {actionData?.error ? (
+            <div className="text-sm text-error-500">
+              {actionData.error.message}
+            </div>
+          ) : null}
+
           <div className="mt-7 flex gap-1">
             <Button
               variant="secondary"
@@ -277,11 +293,6 @@ export default function InviteUser() {
             </Button>
           </div>
         </Form>
-        {actionData?.error ? (
-          <div className="text-sm text-error-500">
-            {actionData.error.message}
-          </div>
-        ) : null}
       </div>
     </>
   ) : null;

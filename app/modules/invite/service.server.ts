@@ -1,7 +1,6 @@
 import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext } from "@remix-run/node";
-import type { Params } from "@remix-run/react";
 import jwt from "jsonwebtoken";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
@@ -340,7 +339,22 @@ export async function updateInviteStatus({
 
       await db.teamMember.update({
         where: { id: invite.teamMemberId },
-        data: { deletedAt: null, user: { connect: { id: user.id } } },
+        data: {
+          deletedAt: null,
+          user: { connect: { id: user.id } },
+          /**
+           * This handles a special case.
+           * If an invite is still pending, the team member is not yet linked to a user.
+           * However the admin is allowed to assign bookings to that team member.
+           * When the invite is accepted, we need to update all those bookings to also be linked to the user so they can see it on their bookings index.
+           */
+          bookings: {
+            updateMany: {
+              where: { custodianTeamMemberId: invite.teamMemberId },
+              data: { custodianUserId: user.id },
+            },
+          },
+        },
       });
     }
 
@@ -375,10 +389,10 @@ export async function updateInviteStatus({
  */
 export async function checkUserAndInviteMatch({
   context,
-  params,
+  invite,
 }: {
   context: AppLoadContext;
-  params: Params<string>;
+  invite: Invite;
 }) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -395,16 +409,7 @@ export async function checkUserAndInviteMatch({
     })
     .catch(() => null);
 
-  /** We get the invite based on the id of the params */
-  const inv = await db.invite
-    .findFirst({
-      where: {
-        id: params.inviteId,
-      },
-    })
-    .catch(() => null);
-
-  if (user?.email !== inv?.inviteeEmail) {
+  if (user?.email !== invite?.inviteeEmail) {
     throw new ShelfError({
       cause: null,
       title: "Wrong user",
