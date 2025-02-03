@@ -12,8 +12,8 @@ import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
-  createEmailAuthAccount,
   deleteAuthAccount,
+  createEmailAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
@@ -219,7 +219,6 @@ export async function createUserFromSSO(
 ) {
   try {
     const { email, userId } = authSession;
-
     const { firstName, lastName, groups } = userData;
     const emailDomain = email.split("@")[1];
 
@@ -639,7 +638,7 @@ export async function updateUser<T extends Prisma.UserInclude>(
   /**
    * Remove password from object so we can pass it to prisma user update
    * Also we remove the email as we dont allow it to be changed for now
-   */
+   * */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
     updateUserPayload
@@ -970,7 +969,7 @@ export async function softDeleteUser(id: User["id"]) {
         }
         /**
          * Remove the user from all organizations the user belongs to but doesnt own.
-         */
+         * */
         await revokeAccessToOrganization({
           userId: id,
           organizationId: userOrg.organizationId,
@@ -997,7 +996,7 @@ export async function softDeleteUser(id: User["id"]) {
      *
      * Note: This happens outside of the transaction because we dont want to rollback the deletion of the user if the deletion of the picture fails
      * If it fails for some reason, we will get it in our logs that there was an issue so we can check it manually
-     */
+     * */
     if (user.profilePicture) {
       await deleteProfilePicture({ url: user.profilePicture });
     }

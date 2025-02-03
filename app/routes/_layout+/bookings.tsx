@@ -81,7 +81,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /**
      * For self service and base users, we need to get the teamMember to be able to filter by it as well.
-     * Tis is to handle a case when a booking was assigned when there wasnt a user attached to a team member but they were later on linked.
+     * This is to handle a case when a booking was assigned when there wasn't a user attached to a team member but they were later on linked.
      * This is to ensure that the booking is still visible to the user that was assigned to it.
      * Also this shouldn't really happen as we now have a fix implemented when accepting invites,
      * to make sure it doesnt happen, hwoever its good to keep this as an extra safety thing.

@@ -2,7 +2,6 @@ import { useEffect, useMemo } from "react";
 import { useFetcher } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import type { ModelFiltersLoader } from "~/routes/api+/model-filters";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";

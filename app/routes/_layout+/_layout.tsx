@@ -153,12 +153,12 @@ export default function App() {
   const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
   const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
-  // const renderInstallPwaPromptOnMobile = () =>
-  //   // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
-  //   window.matchMedia("(max-width: 640px)").matches &&
-  //   !window.matchMedia("(display-mode: standalone)").matches ? (
-  //     <InstallPwaPromptModal />
-  //   ) : null;
+  const renderInstallPwaPromptOnMobile = () =>
+    // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
+    window.matchMedia("(max-width: 640px)").matches &&
+    !window.matchMedia("(display-mode: standalone)").matches ? (
+      <InstallPwaPromptModal />
+    ) : null;
 
   return (
     <SidebarProvider defaultOpen={!minimizedSidebar}>
@@ -197,7 +197,9 @@ export default function App() {
           </>
         )}
         <Toaster />
-        <ClientOnly fallback={null}>{InstallPwaPromptModal}</ClientOnly>
+        <ClientOnly fallback={null}>
+          {renderInstallPwaPromptOnMobile}
+        </ClientOnly>
       </SidebarInset>
     </SidebarProvider>
   );
