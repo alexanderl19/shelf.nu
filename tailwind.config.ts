@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import colors from "tailwindcss/colors";
 
 export default {
   content: [
@@ -102,6 +103,7 @@ export default {
       colors: {
         white: "#ffffff",
         black: "#000000",
+        muted: colors.gray[200],
         gray: {
           25: "#FCFCFD",
           50: "#F9FAFB",
@@ -229,6 +231,15 @@ export default {
             strong: "#f9fafb", // gray-50
             inverted: "#000000", // black
           },
+        },
+        sidebar: {
+          DEFAULT: "var(--sidebar-background)",
+          foreground: "hsl(var(--sidebar-foreground))",
+          primary: "hsl(var(--sidebar-primary))",
+          "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
+          accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
+          border: "hsl(var(--sidebar-border))",
         },
       },
 

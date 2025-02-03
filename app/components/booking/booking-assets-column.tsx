@@ -5,7 +5,7 @@ import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { tw } from "~/utils/tw";
 import { groupBy } from "~/utils/utils";
@@ -211,6 +211,7 @@ export function BookingAssetsColumn() {
                                   onClick={() => toggleKitExpansion(kit.id)}
                                   variant="link"
                                   className="text-center font-bold text-gray-600 hover:text-gray-900"
+                                  aria-label="Toggle kit expand"
                                 >
                                   <ChevronDownIcon
                                     className={tw(

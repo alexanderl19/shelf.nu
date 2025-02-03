@@ -1,6 +1,10 @@
 import type { Asset, AssetStatus, Location, Prisma } from "@prisma/client";
 import { z } from "zod";
+import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { getParamsValues } from "~/utils/list";
+import type { AdvancedIndexAsset } from "./types";
+import type { Column } from "../asset-index-settings/helpers";
 
 export function getLocationUpdateNoteContent({
   currentLocation,
@@ -144,3 +148,105 @@ export function getAssetsWhereInput({
 
   return where;
 }
+
+/**
+ * Schema for validating advanced filter parameter format
+ * Validates the 'operator:value' format and ensures operator is valid
+ */
+export const advancedFilterFormatSchema = z.string().refine(
+  (value) => {
+    const parts = value.split(":");
+    if (parts.length !== 2) return false;
+
+    const [operator] = parts;
+    return filterOperatorSchema.safeParse(operator).success;
+  },
+  {
+    message: "Filter must be in format 'operator:value' with valid operator",
+  }
+);
+
+/**
+ * Validates if a filter value matches the expected advanced filter format
+ * Uses Zod schema for strict type validation
+ * @param value - The filter value to validate
+ * @returns boolean indicating if the value matches advanced filter format
+ */
+function isValidAdvancedFilterFormat(value: string): boolean {
+  return advancedFilterFormatSchema.safeParse(value).success;
+}
+
+/**
+ * Validates and sanitizes URL parameters for advanced index mode
+ * Removes any parameters that don't match the expected advanced filter format
+ * @param searchParams - The URL search parameters to validate
+ * @param columns - The configured columns for advanced index
+ * @returns Validated and sanitized search parameters
+ */
+export function validateAdvancedFilterParams(
+  searchParams: URLSearchParams,
+  columns: Column[]
+): URLSearchParams {
+  const validatedParams = new URLSearchParams();
+  const columnNames = columns.map((col) => col.name);
+
+  // Iterate through all parameters
+  searchParams.forEach((value, key) => {
+    // Preserve non-filter params (pagination, sorting, etc)
+    if (!columnNames.includes(key as any)) {
+      validatedParams.append(key, value);
+      return;
+    }
+
+    // Validate filter format for column parameters
+    if (isValidAdvancedFilterFormat(value)) {
+      validatedParams.append(key, value);
+    }
+    // Invalid format - parameter will be dropped
+  });
+
+  return validatedParams;
+}
+
+export function formatAssetsRemindersDates({
+  assets,
+  request,
+}: {
+  assets: AdvancedIndexAsset[];
+  request: Request;
+}) {
+  if (!assets.length) {
+    return assets;
+  }
+
+  return assets.map((asset) => {
+    if (!asset.upcomingReminder) {
+      return asset;
+    }
+
+    return {
+      ...asset,
+      upcomingReminder: {
+        ...asset.upcomingReminder,
+        displayDate: getDateTimeFormat(request, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(new Date(asset.upcomingReminder.alertDateTime)),
+      },
+    };
+  });
+}
+
+export const importAssetsSchema = z
+  .object({
+    title: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    kit: z.string().optional(),
+    tags: z.string().array(),
+    location: z.string().optional(),
+    custodian: z.string().optional(),
+    bookable: z.enum(["yes", "no"]).optional().nullable(),
+    imageUrl: z.string().url().optional(),
+  })
+  .and(z.record(z.string(), z.any()));

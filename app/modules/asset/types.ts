@@ -10,9 +10,13 @@ import type {
   Tag,
   User,
   CustomFieldType,
+  AssetReminder,
+  Organization,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
+import type { z } from "zod";
 import type { assetIndexFields } from "./fields";
+import type { importAssetsSchema } from "./utils.server";
 
 export interface ICustomFieldValueJson {
   raw: string | number | boolean;
@@ -42,19 +46,13 @@ export interface UpdateAssetPayload {
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   valuation?: Asset["valuation"];
+  organizationId: Organization["id"];
 }
 
-export interface CreateAssetFromContentImportPayload
-  extends Record<string, any> {
-  title: string;
-  description?: string;
-  category?: string;
-  kit?: string;
-  tags: string[];
-  location?: string;
-  custodian?: string;
-  bookable?: "yes" | "no";
-}
+export type CreateAssetFromContentImportPayload = z.infer<
+  typeof importAssetsSchema
+>;
+
 export interface CreateAssetFromBackupImportPayload
   extends Record<string, any> {
   id: string;
@@ -139,11 +137,17 @@ export type AdvancedIndexAsset = Pick<
       categories: Pick<Category, "id" | "name">[] | null;
     };
   })[];
+  upcomingReminder?: Pick<
+    AssetReminder,
+    "id" | "alertDateTime" | "name" | "message"
+  > & {
+    displayDate: string;
+  };
 };
 // Type for the entire query result
 export type AdvancedIndexQueryResult = Array<{
   total_count: number;
-  assets: AdvancedIndexAsset[];
+  assets: AdvancedIndexAsset[]; // This is now guaranteed to be an array, never null
 }>;
 
 export interface CustomFieldSorting {

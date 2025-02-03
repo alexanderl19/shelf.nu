@@ -11,7 +11,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
@@ -79,6 +79,7 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
       status: 404,
       additionalData: { id },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -242,9 +243,10 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
       message:
         "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
       title: "QR code not found",
-      status: 403,
+      status: 404,
       additionalData: { qrId, organizationId },
       label,
+      shouldBeCaptured: !isNotFoundError(cause),
     });
   }
 }
@@ -456,8 +458,8 @@ interface QRCodeMapParams {
 export async function getQrCodeMaps({
   assets,
   size,
-}: QRCodeMapParams): Promise<Map<string, string>> {
-  const finalMap = new Map<string, string>();
+}: QRCodeMapParams): Promise<Record<string, string>> {
+  const finalObject: Record<string, string> = {};
 
   try {
     const qrCodePromises = assets.map(async (asset) => {
@@ -471,8 +473,9 @@ export async function getQrCodeMaps({
               qr,
             })
           : null;
+
         if (qrCode?.code) {
-          finalMap.set(asset.id, qrCode?.code?.src || "");
+          finalObject[asset.id] = qrCode.code.src || "";
         }
       } catch (error) {
         // Handle the error if needed
@@ -486,7 +489,8 @@ export async function getQrCodeMaps({
     // eslint-disable-next-line no-console
     console.error("Error generating QR code maps:", err);
   }
-  return finalMap;
+
+  return finalObject;
 }
 
 /** Extracts qrCodes from data and checks their validity for import

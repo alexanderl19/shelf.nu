@@ -131,9 +131,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       {
         custodianUserId: custodian?.userId,
         custodianTeamMemberId: custodian?.id,
-        organizationId,
         name,
         description,
+        organizationId,
         from,
         to,
         assetIds,
@@ -183,6 +183,7 @@ export const handle = {
 };
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+
 export default function NewBooking() {
   const { isSelfServiceOrBase, teamMembers, assetIds } =
     useLoaderData<typeof loader>();

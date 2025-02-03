@@ -213,7 +213,6 @@ function AdvancedFilter() {
                         />
                       </div>
 
-                      {/* Only show operator and value fields if a column is selected */}
                       {filter.name && (
                         <>
                           <div className="w-[50px] shrink-0">
@@ -226,6 +225,11 @@ function AdvancedFilter() {
                                   return newFilters;
                                 });
                               }}
+                              disabled={
+                                filter.isNew
+                                  ? { reason: "Please select a column" }
+                                  : false
+                              }
                             />
                           </div>
                           <div className="min-w-0 grow">
@@ -241,6 +245,7 @@ function AdvancedFilter() {
                               applyFilters={applyFilters}
                               fieldName={getFieldName(index)}
                               zormError={getError(index)}
+                              disabled={filter.isNew}
                             />
                           </div>
                         </>
@@ -283,6 +288,14 @@ function AdvancedFilter() {
                   <PlusIcon />
                 </div>
                 <span className="inline-block align-middle">Add filter</span>
+              </Button>
+              <Button
+                variant="block-link-gray"
+                size="xs"
+                className="ml-1"
+                to="mailto:nikolay@shelf.nu?subject=Advanced filtering suggestions"
+              >
+                Need more filtering options?
               </Button>
             </div>
             <div className="flex items-center justify-between gap-4">

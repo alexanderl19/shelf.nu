@@ -9,21 +9,26 @@ import { useNavigation } from "@remix-run/react";
 import { useSearchParams } from "~/hooks/search-params";
 
 import { isFormProcessing } from "~/utils/form";
-import { tw } from "~/utils/tw";
 
-const sortingOptions: { [key: string]: string } = {
-  title: "Name",
-  createdAt: "Date created",
-  updatedAt: "Date updated",
-};
-
-export type SortingOptions = keyof typeof sortingOptions;
+type TSort = Record<string, string>;
+export type SortingOptions = keyof TSort;
 export type SortingDirection = "asc" | "desc";
 
-export function SortBy() {
+type SortByProps<T extends TSort> = {
+  sortingOptions: T;
+  defaultSortingBy: keyof T;
+  defaultSortingDirection?: SortingDirection;
+};
+
+export function SortBy<T extends Record<string, string>>({
+  sortingOptions,
+  defaultSortingBy,
+  defaultSortingDirection = "desc",
+}: SortByProps<T>) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const orderBy = searchParams.get("orderBy") || "createdAt";
-  const orderDirection = searchParams.get("orderDirection") || "desc";
+  const orderBy = searchParams.get("orderBy") || String(defaultSortingBy);
+  const orderDirection =
+    searchParams.get("orderDirection") || defaultSortingDirection;
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -41,20 +46,18 @@ export function SortBy() {
         className="inline-flex items-center gap-2 text-gray-500"
         asChild
       >
-        <div className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-[10px] text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
+        <button className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-[10px] text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
           <span className="truncate whitespace-nowrap text-[14px]">
             {/* We only show the message if orderBy is present in params so in the default case we dont show it */}
             Sorted by: {sortingOptions[orderBy]}
           </span>
           <CaretSortIcon />
-        </div>
+        </button>
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
           align="end"
-          className={tw(
-            "z-[100]  flex flex-col gap-3 overflow-y-auto rounded-md border border-gray-300 bg-white p-4"
-          )}
+          className="z-[100]  flex flex-col gap-3 overflow-y-auto rounded-md border border-gray-300 bg-white p-4"
         >
           <div>
             <h5>Sort by:</h5>

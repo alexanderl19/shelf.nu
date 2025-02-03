@@ -24,7 +24,12 @@ import {
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isZodValidationError,
+  makeShelfError,
+  notAllowedMethod,
+} from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
@@ -99,7 +104,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(
+      cause,
+      undefined,
+      isLikeShelfError(cause)
+        ? cause.shouldBeCaptured
+        : !isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }

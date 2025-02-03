@@ -1,7 +1,7 @@
 import type { Kit } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import type { BookingWithCustodians } from "~/modules/booking/types";
 import { tw } from "~/utils/tw";
 import { TrashIcon, VerticalDotsIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -32,6 +32,7 @@ export default function KitRowActionsDropdown({
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
         className={tw("asset-actions", fullWidth ? "w-full" : "")}
+        aria-label="Actions Trigger"
       >
         <span className="flex size-6 items-center justify-center gap-2 text-center">
           <VerticalDotsIcon />

@@ -19,7 +19,8 @@ import {
   ErrorCorrection,
   Prisma,
 } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { LRUCache } from "lru-cache";
 import type {
   SortingDirection,
   SortingOptions,
@@ -42,7 +43,13 @@ import {
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { LEGACY_CUID_LENGTH } from "~/utils/constants";
+import {
+  getFiltersFromRequest,
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
   extractCustomFieldValuesFromPayload,
@@ -59,10 +66,17 @@ import {
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import * as importImageCacheServer from "~/utils/import.image-cache.server";
+import type { CachedImage } from "~/utils/import.image-cache.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { isValidImageUrl } from "~/utils/misc";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
-import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import {
+  createSignedUrl,
+  parseFileFormData,
+  uploadImageFromUrl,
+} from "~/utils/storage.server";
 
 import { resolveTeamMemberName } from "~/utils/user";
 import { assetIndexFields } from "./fields";
@@ -84,10 +98,12 @@ import type {
   UpdateAssetPayload,
 } from "./types";
 import {
+  formatAssetsRemindersDates,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
+import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 
 import { createNote } from "../note/service.server";
@@ -184,27 +200,25 @@ const unavailableBookingStatuses = [
 ];
 
 /**
- * Fetches assets from AssetSearchView
- * This is used to have a more advanced search however its less performant
+ * Fetches assets directly from the asset table with enhanced search capabilities
+ * @param params Search and filtering parameters for asset queries
+ * @returns Assets and total count matching the criteria
  */
-async function getAssetsFromView(params: {
+async function getAssets(params: {
   organizationId: Organization["id"];
-  /** Page number. Starts at 1 */
   page: number;
-  /** Assets to be loaded per page */
-
   orderBy: SortingOptions;
   orderDirection: SortingDirection;
   perPage?: number;
   search?: string | null;
   categoriesIds?: Category["id"][] | null;
+  locationIds?: Location["id"][] | null;
   tagsIds?: Tag["id"][] | null;
   status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
-  locationIds?: Location["id"][] | null;
   teamMemberIds?: TeamMember["id"][] | null;
   extraInclude?: Prisma.AssetInclude;
 }) {
@@ -216,379 +230,77 @@ async function getAssetsFromView(params: {
     perPage = 8,
     search,
     categoriesIds,
-    tagsIds,
-    status,
-    bookingFrom,
-    bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
-    locationIds,
-    teamMemberIds,
-    extraInclude,
-  } = params;
-
-  try {
-    const skip = page > 1 ? (page - 1) * perPage : 0;
-    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
-
-    /** Default value of where. Takes the assets belonging to current user */
-    let where: Prisma.AssetSearchViewWhereInput = {
-      asset: {
-        organizationId,
-        // Ensure asset exists
-        id: { not: undefined },
-      },
-    };
-
-    /** If the search string exists, add it to the where object */
-    if (search) {
-      try {
-        const words = search
-          .replace(/([()&|!':><])/g, "\\$1")
-          .trim()
-          .replace(/ +/g, " ")
-          .split(" ")
-          .map((w) => {
-            const trimmed = w.trim();
-            return trimmed ? trimmed + ":*" : "";
-          })
-          .filter(Boolean)
-          .join(" & ");
-
-        where.searchVector = {
-          search: words || undefined, // Prevent empty search causing DB error
-        };
-      } catch (error) {
-        // Log error but allow query to continue without search filter
-        Logger.error(
-          new ShelfError({
-            cause: error,
-            message: "Failed to parse search string for tsquery",
-            additionalData: { search },
-            label: "Assets",
-          })
-        );
-      }
-    }
-
-    if (status && where.asset) {
-      where.asset.status = status;
-    }
-
-    if (categoriesIds && categoriesIds.length > 0 && where.asset) {
-      if (categoriesIds.includes("uncategorized")) {
-        where.asset.OR = [
-          {
-            categoryId: {
-              in: categoriesIds,
-            },
-          },
-          {
-            categoryId: null,
-          },
-        ];
-      } else {
-        where.asset.categoryId = {
-          in: categoriesIds,
-        };
-      }
-    }
-
-    if (hideUnavailable && where.asset) {
-      //not disabled for booking
-      where.asset.availableToBook = true;
-      //not assigned to team meber
-      where.asset.custody = null;
-      if (bookingFrom && bookingTo) {
-        //reserved during that time
-        where.asset.bookings = {
-          none: {
-            ...(unhideAssetsBookigIds?.length && {
-              id: { notIn: unhideAssetsBookigIds },
-            }),
-            status: { in: unavailableBookingStatuses },
-            OR: [
-              {
-                from: { lte: bookingTo },
-                to: { gte: bookingFrom },
-              },
-              {
-                from: { gte: bookingFrom },
-                to: { lte: bookingTo },
-              },
-            ],
-          },
-        };
-      }
-    }
-    if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-      throw new ShelfError({
-        cause: null,
-        message: "booking dates are needed to hide unavailable assets",
-        additionalData: {
-          hideUnavailable,
-          bookingFrom,
-          bookingTo,
-        },
-        label,
-      });
-    }
-    if (bookingFrom && bookingTo && where.asset) {
-      where.asset.availableToBook = true;
-    }
-
-    if (tagsIds && tagsIds.length > 0 && where.asset) {
-      // Check if 'untagged' is part of the selected tag IDs
-      if (tagsIds.includes("untagged")) {
-        // Remove 'untagged' from the list of tags
-        tagsIds = tagsIds.filter((id) => id !== "untagged");
-
-        // Filter for assets that are untagged only
-        where.asset.OR = [
-          ...(where.asset.OR || []), // Preserve existing AND conditions if any
-          { tags: { none: {} } }, // Include assets with no tags
-        ];
-      }
-
-      // If there are other tags specified, apply AND condition
-      if (tagsIds.length > 0) {
-        where.asset.OR = [
-          ...(where.asset.OR || []), // Preserve existing AND conditions if any
-          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
-        ];
-      }
-    }
-
-    if (locationIds && locationIds.length > 0 && where.asset) {
-      // Check if 'without-location' is part of the selected location IDs
-      if (locationIds.includes("without-location")) {
-        // Remove 'without-location' from the list of locations
-        locationIds = locationIds.filter((id) => id !== "without-location");
-
-        // Filter for assets that have no location only
-        where.asset.OR = [
-          ...(where.asset.OR || []), // Preserve existing OR conditions if any
-          { locationId: null }, // Include assets with no location
-        ];
-      }
-
-      // If there are other locations specified, apply OR condition
-      if (locationIds.length > 0) {
-        where.asset.OR = [
-          ...(where.asset.OR || []), // Preserve existing OR conditions if any
-          { locationId: { in: locationIds } }, // Filter by remaining locations
-        ];
-      }
-    }
-
-    if (teamMemberIds && teamMemberIds.length > 0 && where.asset) {
-      // Check if "without-custody" is selected
-      const hasWithoutCustody = teamMemberIds.includes("without-custody");
-      // Check if there are other specific team members
-      const hasSpecificTeamMembers = teamMemberIds.some(
-        (id) => id !== "without-custody"
-      );
-      if (hasWithoutCustody && hasSpecificTeamMembers) {
-        // If both conditions are true, logically ensure no results are returned
-        where.asset.AND = [
-          //@ts-expect-error
-          ...(where.asset.AND ?? []),
-          { custody: { is: null } }, // Assets without custody
-          {
-            custody: {
-              teamMemberId: {
-                in: teamMemberIds.filter((id) => id !== "without-custody"),
-              },
-            },
-          }, // Assets with specific team members
-        ];
-      } else {
-        // Combine conditions using AND to ensure all filters apply together
-        where.asset.AND = [
-          // Preserve any existing AND conditions
-          ...(where.asset.AND ?? []),
-          hasWithoutCustody
-            ? {
-                /** If without custody is selected, get assets without custody  */
-                custody: { is: null },
-              }
-            : {
-                // Use OR to match assets that are in custody of specified team members
-                OR: [
-                  // Assets directly assigned to the specified team members
-                  { custody: { teamMemberId: { in: teamMemberIds } } },
-                  // Assets assigned to the specified team members through an ongoing or overdue booking
-                  {
-                    bookings: {
-                      some: {
-                        custodianTeamMemberId: { in: teamMemberIds },
-                        status: { in: ["ONGOING", "OVERDUE"] },
-                      },
-                    },
-                  },
-                  // Assets assigned to a user who is a member of the specified team through an ongoing or overdue booking
-                  {
-                    bookings: {
-                      some: {
-                        custodianUserId: { in: teamMemberIds },
-                        status: { in: ["ONGOING", "OVERDUE"] },
-                      },
-                    },
-                  },
-                  // Assets in custody of a user who is in the specified team
-                  { custody: { custodian: { userId: { in: teamMemberIds } } } },
-                ],
-              },
-        ];
-      }
-    }
-
-    /**
-     * User should only see the assets without kits for hideUnavailable true
-     */
-    if (hideUnavailable === true && where.asset) {
-      where.asset.kit = null;
-    }
-    const ASSET_INDEX_FIELDS = assetIndexFields({
-      bookingFrom,
-      bookingTo,
-      unavailableBookingStatuses,
-    });
-    const [assetSearch, totalAssets] = await Promise.all([
-      /** Get the assets */
-      db.assetSearchView.findMany({
-        skip,
-        take,
-        where,
-        include: {
-          asset: {
-            include: {
-              ...ASSET_INDEX_FIELDS,
-              ...extraInclude,
-            },
-          },
-        },
-        orderBy: { asset: { [orderBy]: orderDirection } },
-      }),
-
-      /** Count them */
-      db.assetSearchView.count({ where }),
-    ]);
-
-    // Filter out null assets while logging errors for monitoring
-    const validAssets = assetSearch.filter((result) => {
-      if (!result.asset) {
-        Logger.error(
-          new ShelfError({
-            cause: null,
-            message: "Found AssetSearchView record without associated asset",
-            label: "Assets",
-            additionalData: {
-              searchViewRecord: result,
-              organizationId,
-              query: "getAssetsFromView",
-              where,
-            },
-          })
-        );
-        return false;
-      }
-      return true;
-    });
-
-    return {
-      assets: validAssets.map((result) => result.asset),
-      totalAssets: totalAssets,
-    };
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while fetching assets from view",
-      additionalData: { ...params },
-      label,
-    });
-  }
-}
-
-/**
- * Fetches assets directly from asset table
- */
-async function getAssets(params: {
-  organizationId: Organization["id"];
-  /** Page number. Starts at 1 */
-  page: number;
-
-  orderBy: SortingOptions;
-  orderDirection: SortingDirection;
-
-  /** Assets to be loaded per page */
-  perPage?: number;
-  search?: string | null;
-  categoriesIds?: Category["id"][] | null;
-  locationIds?: Location["id"][] | null;
-  tagsIds?: Tag["id"][] | null;
-  status?: Asset["status"] | null;
-  hideUnavailable?: Asset["availableToBook"];
-  bookingFrom?: Booking["from"];
-  bookingTo?: Booking["to"];
-  unhideAssetsBookigIds?: Booking["id"][];
-  teamMemberIds?: TeamMember["id"][] | null;
-  extraInclude?: Prisma.AssetInclude;
-}) {
-  const {
-    organizationId,
-    orderBy,
-    orderDirection,
-    page = 1,
-    perPage = 8,
-    search,
-    categoriesIds,
     locationIds,
     tagsIds,
     status,
     bookingFrom,
     bookingTo,
     hideUnavailable,
-    unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
+    unhideAssetsBookigIds,
     teamMemberIds,
     extraInclude,
   } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
-    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    /** Default value of where. Takes the assetss belonging to current user */
     let where: Prisma.AssetWhereInput = { organizationId };
 
-    /** If the search string exists, add it to the where object */
     if (search) {
-      where.title = {
-        contains: search.toLowerCase().trim(),
-        mode: "insensitive",
-      };
+      const searchTerms = search
+        .toLowerCase()
+        .trim()
+        .split(",")
+        .map((term) => term.trim())
+        .filter(Boolean);
+
+      where.OR = searchTerms.map((term) => ({
+        OR: [
+          // Search in asset fields
+          { title: { contains: term, mode: "insensitive" } },
+          { description: { contains: term, mode: "insensitive" } },
+          // Search in related category
+          { category: { name: { contains: term, mode: "insensitive" } } },
+          // Search in related location
+          { location: { name: { contains: term, mode: "insensitive" } } },
+          // Search in related tags
+          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
+          // Search in custodian names
+          {
+            custody: {
+              custodian: {
+                OR: [
+                  { name: { contains: term, mode: "insensitive" } },
+                  {
+                    user: {
+                      OR: [
+                        { firstName: { contains: term, mode: "insensitive" } },
+                        { lastName: { contains: term, mode: "insensitive" } },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      }));
     }
 
     if (status) {
       where.status = status;
     }
 
-    if (categoriesIds && categoriesIds.length > 0) {
+    if (categoriesIds?.length) {
       if (categoriesIds.includes("uncategorized")) {
         where.OR = [
-          {
-            categoryId: {
-              in: categoriesIds,
-            },
-          },
-          {
-            categoryId: null,
-          },
+          ...(where.OR ?? []),
+          { categoryId: { in: categoriesIds } },
+          { categoryId: null },
         ];
       } else {
-        where.categoryId = {
-          in: categoriesIds,
-        };
+        where.categoryId = { in: categoriesIds };
       }
     }
 
@@ -635,15 +347,25 @@ async function getAssets(params: {
       where.availableToBook = true;
     }
 
-    if (tagsIds && tagsIds.length > 0) {
+    if (tagsIds && tagsIds.length) {
+      // Check if 'untagged' is part of the selected tag IDs
       if (tagsIds.includes("untagged")) {
+        // Remove 'untagged' from the list of tags
+        tagsIds = tagsIds.filter((id) => id !== "untagged");
+
+        // Filter for assets that are untagged only
         where.OR = [
-          ...(where.OR ?? []),
-          { tags: { every: { id: { in: tagsIds } } } },
-          { tags: { none: {} } },
+          ...(where.OR || []), // Preserve existing AND conditions if any
+          { tags: { none: {} } }, // Include assets with no tags
         ];
-      } else {
-        where.AND = tagsIds.map((tagId) => ({ id: tagId }));
+      }
+
+      // If there are other tags specified, apply AND condition
+      if (tagsIds.length > 0) {
+        where.OR = [
+          ...(where.OR || []), // Preserve existing AND conditions if any
+          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
+        ];
       }
     }
 
@@ -686,71 +408,20 @@ async function getAssets(params: {
     }
 
     const [assets, totalAssets] = await Promise.all([
-      /** Get the assets */
       db.asset.findMany({
         skip,
         take,
         where,
         include: {
-          kit: true,
-          category: true,
-          tags: true,
-          location: {
-            select: {
-              name: true,
-            },
-          },
-          custody: {
-            select: {
-              custodian: {
-                select: {
-                  userId: true,
-                  name: true,
-                  user: {
-                    select: {
-                      email: true,
-                      firstName: true,
-                      lastName: true,
-                      profilePicture: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-          ...(bookingTo && bookingFrom
-            ? {
-                bookings: {
-                  where: {
-                    status: { in: unavailableBookingStatuses },
-                    OR: [
-                      {
-                        from: { lte: bookingTo },
-                        to: { gte: bookingFrom },
-                      },
-                      {
-                        from: { gte: bookingFrom },
-                        to: { lte: bookingTo },
-                      },
-                    ],
-                  },
-                  take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
-                  select: {
-                    from: true,
-                    to: true,
-                    status: true,
-                    id: true,
-                    name: true,
-                  },
-                },
-              }
-            : {}),
+          ...assetIndexFields({
+            bookingFrom,
+            bookingTo,
+            unavailableBookingStatuses,
+          }),
           ...extraInclude,
         },
         orderBy: { [orderBy]: orderDirection },
       }),
-
-      /** Count them */
       db.asset.count({ where }),
     ]);
 
@@ -852,7 +523,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       totalAssets,
       perPage: take,
       page,
-      assets,
+      assets: formatAssetsRemindersDates({ assets, request }),
       totalPages,
       cookie,
     };
@@ -883,6 +554,9 @@ export async function createAsset({
   organizationId,
   valuation,
   availableToBook = true,
+  mainImage,
+  mainImageExpiration,
+  id: assetId, // Add support for passing an ID
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -895,6 +569,9 @@ export async function createAsset({
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   organizationId: Organization["id"];
   availableToBook?: Asset["availableToBook"];
+  id?: Asset["id"]; // Make ID optional
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
 }) {
   try {
     /** User connection data */
@@ -939,7 +616,8 @@ export async function createAsset({
           };
 
     /** Data object we send via prisma to create Asset */
-    const data = {
+    const data: Prisma.AssetCreateInput = {
+      id: assetId, // Use provided ID if available
       title,
       description,
       user,
@@ -947,6 +625,8 @@ export async function createAsset({
       valuation,
       organization,
       availableToBook,
+      mainImage,
+      mainImageExpiration,
     };
 
     /** If a categoryId is passed, link the category to the asset. */
@@ -1057,6 +737,7 @@ export async function updateAsset({
   userId,
   valuation,
   customFieldsValues: customFieldsValuesFromForm,
+  organizationId,
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
@@ -1161,7 +842,7 @@ export async function updateAsset({
     }
 
     const asset = await db.asset.update({
-      where: { id },
+      where: { id, organizationId },
       data,
       include: { location: true, tags: true },
     });
@@ -1214,7 +895,7 @@ export async function updateAsset({
     return asset;
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Asset", {
-      additionalData: { userId, id },
+      additionalData: { userId, id, organizationId },
     });
   }
 }
@@ -1224,9 +905,16 @@ export async function deleteAsset({
   organizationId,
 }: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
   try {
-    return await db.asset.deleteMany({
+    const deletedAsset = await db.asset.delete({
       where: { id, organizationId },
+      select: {
+        reminders: {
+          select: { alertDateTime: true, activeSchedulerReference: true },
+        },
+      },
     });
+
+    await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1241,10 +929,14 @@ export async function updateAssetMainImage({
   request,
   assetId,
   userId,
+  organizationId,
+  isNewAsset = false,
 }: {
   request: Request;
   assetId: string;
   userId: User["id"];
+  organizationId: Organization["id"];
+  isNewAsset?: boolean;
 }) {
   try {
     const fileData = await parseFileFormData({
@@ -1254,7 +946,7 @@ export async function updateAssetMainImage({
         Date.now()
       )}`,
       resizeOptions: {
-        width: 800,
+        width: 1200,
         withoutEnlargement: true,
       },
     });
@@ -1272,8 +964,16 @@ export async function updateAssetMainImage({
       mainImage: signedUrl,
       mainImageExpiration: oneDayFromNow(),
       userId,
+      organizationId,
     });
-    await deleteOtherImages({ userId, assetId, data: { path: image } });
+
+    /**
+     * If updateAssetMainImage is called from new asset route, then we don't have to delete other images
+     * bcause no others images for this assets exists yet.
+     */
+    if (!isNewAsset) {
+      await deleteOtherImages({ userId, assetId, data: { path: image } });
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1411,6 +1111,7 @@ export function createCustomFieldsPayloadFromAsset(
     ) || {}
   );
 }
+
 export async function duplicateAsset({
   asset,
   userId,
@@ -1587,7 +1288,6 @@ export async function getPaginatedAndFilterableAssets({
   extraInclude,
   excludeCategoriesQuery = false,
   excludeTagsQuery = false,
-  excludeSearchFromView = false,
   excludeLocationQuery = false,
   filters = "",
   isSelfService,
@@ -1601,11 +1301,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery?: boolean;
   excludeLocationQuery?: boolean;
   filters?: string;
-  /**
-   * Set to true if you want the query to be performed by directly accessing the assets table
-   *  instead of the AssetSearchView
-   */
-  excludeSearchFromView?: boolean;
+
   isSelfService?: boolean;
   userId?: string;
 }) {
@@ -1687,9 +1383,7 @@ export async function getPaginatedAndFilterableAssets({
       }),
     ]);
 
-    let getFunction = getAssetsFromView;
-
-    let getParams = {
+    const { assets, totalAssets } = await getAssets({
       organizationId,
       page,
       perPage,
@@ -1706,12 +1400,8 @@ export async function getPaginatedAndFilterableAssets({
       locationIds,
       teamMemberIds,
       extraInclude,
-    };
-    if (excludeSearchFromView) {
-      getFunction = getAssets;
-    }
+    });
 
-    const { assets, totalAssets } = await getFunction(getParams);
     const totalPages = Math.ceil(totalAssets / perPage);
 
     return {
@@ -1742,7 +1432,6 @@ export async function getPaginatedAndFilterableAssets({
         organizationId,
         excludeCategoriesQuery,
         excludeTagsQuery,
-        excludeSearchFromView,
         paramsValues,
         getAllEntries,
       },
@@ -1918,6 +1607,10 @@ export async function fetchAssetsForExport({
   }
 }
 
+/**
+ * Creates assets from imported content, handling image URLs if provided
+ * Pre-generates IDs for consistent asset and image file naming
+ */
 export async function createAssetsFromContentImport({
   data,
   userId,
@@ -1928,48 +1621,57 @@ export async function createAssetsFromContentImport({
   organizationId: Organization["id"];
 }) {
   try {
+    // Create cache instance for this import operation
+    const imageCache = new LRUCache<string, CachedImage>({
+      maxSize: importImageCacheServer.MAX_CACHE_SIZE,
+      sizeCalculation: (value) => value.size,
+    });
+
     const qrCodesPerAsset = await parseQrCodesFromImportData({
       data,
       organizationId,
       userId,
     });
 
-    const kits = await createKitsIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
+    // Create all required related entities
+    const [kits, categories, locations, teamMembers, tags, { customFields }] =
+      await Promise.all([
+        createKitsIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createCategoriesIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createLocationsIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createTeamMemberIfNotExists({
+          data,
+          organizationId,
+        }),
+        createTagsIfNotExists({
+          data,
+          userId,
+          organizationId,
+        }),
+        createCustomFieldsIfNotExists({
+          data,
+          organizationId,
+          userId,
+        }),
+      ]);
 
-    const categories = await createCategoriesIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
-
-    const locations = await createLocationsIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
-
-    const teamMembers = await createTeamMemberIfNotExists({
-      data,
-      organizationId,
-    });
-
-    const tags = await createTagsIfNotExists({
-      data,
-      userId,
-      organizationId,
-    });
-
-    const { customFields } = await createCustomFieldsIfNotExists({
-      data,
-      organizationId,
-      userId,
-    });
-
+    // Process assets sequentially to handle image uploads
     for (let asset of data) {
+      // Generate asset ID upfront
+      const assetId = id(LEGACY_CUID_LENGTH); // This generates our standard CUID format. We use legacy length(25 chars) so it fits with the length of IDS generated by prisma
+
       const customFieldsValues: ShelfAssetCustomFieldValueType[] =
         Object.entries(asset).reduce((res, [key, val]) => {
           if (key.startsWith("cf:") && val) {
@@ -1987,7 +1689,59 @@ export async function createAssetsFromContentImport({
           return res;
         }, [] as ShelfAssetCustomFieldValueType[]);
 
+      // Handle image URL if provided
+      let mainImage: string | undefined;
+      let mainImageExpiration: Date | undefined;
+
+      if (asset.imageUrl) {
+        try {
+          if (!isValidImageUrl(asset.imageUrl)) {
+            throw new ShelfError({
+              cause: null,
+              message: "Invalid image format. Please use .png, .jpg, or .jpeg",
+              additionalData: { url: asset.imageUrl },
+              label: "Assets",
+              shouldBeCaptured: false,
+            });
+          }
+          const filename = `${userId}/${assetId}/main-image-${dateTimeInUnix(
+            Date.now()
+          )}`;
+
+          const path = await uploadImageFromUrl(
+            asset.imageUrl,
+            {
+              filename,
+              contentType: "image/jpeg",
+              bucketName: "assets",
+              resizeOptions: {
+                width: 1200,
+                withoutEnlargement: true,
+              },
+            },
+            imageCache
+          );
+
+          if (path) {
+            mainImage = await createSignedUrl({ filename: path });
+            mainImageExpiration = oneDayFromNow();
+          }
+        } catch (cause) {
+          const isShelfError = isLikeShelfError(cause);
+
+          throw new ShelfError({
+            cause,
+            message: isShelfError
+              ? `${cause?.message} for asset: ${asset.title}`
+              : `Failed to upload image for asset ${asset.title}`,
+            additionalData: { imageUrl: asset.imageUrl, assetId },
+            label: "Assets",
+          });
+        }
+      }
+
       await createAsset({
+        id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.title === asset.title)?.qrId,
         organizationId,
         title: asset.title,
@@ -2008,6 +1762,8 @@ export async function createAssetsFromContentImport({
         valuation: asset.valuation ? +asset.valuation : null,
         customFieldsValues,
         availableToBook: asset?.bookable !== "no",
+        mainImage: mainImage || null,
+        mainImageExpiration: mainImageExpiration || null,
       });
     }
   } catch (cause) {
@@ -2282,14 +2038,15 @@ export async function createAssetsFromBackupImport({
   }
 }
 
-export async function updateAssetBookingAvailability(
-  id: Asset["id"],
-  availability: Asset["availableToBook"]
-) {
+export async function updateAssetBookingAvailability({
+  id,
+  availableToBook,
+  organizationId,
+}: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
   try {
     return await db.asset.update({
-      where: { id },
-      data: { availableToBook: availability },
+      where: { id, organizationId },
+      data: { availableToBook },
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Asset", {
@@ -2421,7 +2178,7 @@ export async function updateAssetQrCode({
     // Disconnect all existing QR codes
     await db.asset
       .update({
-        where: { id: assetId },
+        where: { id: assetId, organizationId },
         data: {
           qrCodes: {
             set: [],
@@ -2440,7 +2197,7 @@ export async function updateAssetQrCode({
     // Connect the new QR code
     return await db.asset
       .update({
-        where: { id: assetId },
+        where: { id: assetId, organizationId },
         data: {
           qrCodes: {
             connect: { id: newQrId },
@@ -2573,8 +2330,9 @@ export async function bulkCheckOutAssets({
       throw new ShelfError({
         cause: null,
         message:
-          "There are sone unavailable assets. Please make sure you are selecting only available assets.",
+          "There are some unavailable assets. Please make sure you are selecting only available assets.",
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
@@ -2670,6 +2428,7 @@ export async function bulkCheckInAssets({
         message:
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
+        shouldBeCaptured: false,
       });
     }
 
@@ -2884,7 +2643,7 @@ export async function bulkAssignAssetTags({
 
     const updatePromises = _assetIds.map((id) =>
       db.asset.update({
-        where: { id },
+        where: { id, organizationId },
         data: {
           tags: {
             [remove ? "disconnect" : "connect"]: tagsIds.map((id) => ({ id })), // IDs of tags you want to connect
@@ -2961,7 +2720,7 @@ export async function relinkQrCode({
     getQr({ id: qrId }),
     getUserByID(userId),
     db.asset.findFirst({
-      where: { id: assetId },
+      where: { id: assetId, organizationId },
       select: { qrCodes: { select: { id: true } } },
     }),
   ]);
@@ -2983,6 +2742,7 @@ export async function relinkQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label: "QR",
+      shouldBeCaptured: false,
     });
   }
 
@@ -3013,29 +2773,79 @@ export async function relinkQrCode({
   ]);
 }
 
-export async function getAvailableAssetsIdsForBooking(
-  assetIds: Asset["id"][]
-): Promise<string[]> {
+export async function getAssetsTabLoaderData({
+  userId,
+  request,
+  organizationId,
+}: {
+  userId: User["id"];
+  request: Request;
+  organizationId: Organization["id"];
+}) {
   try {
-    const selectedAssets = await db.asset.findMany({
-      where: { id: { in: assetIds } },
-      select: { status: true, id: true, kit: true },
-    });
-    if (selectedAssets.some((asset) => asset.kit)) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cannot add assets that belong to a kit.",
-        label: "Booking",
-      });
+    const { filters, redirectNeeded } = await getFiltersFromRequest(
+      request,
+      organizationId
+    );
+
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/assets?${cookieParams.toString()}`);
     }
-    return selectedAssets.map((asset) => asset.id);
-  } catch (cause: ShelfError | any) {
+
+    const filtersSearchParams = new URLSearchParams(filters);
+    filtersSearchParams.set("teamMember", userId);
+
+    const {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      assets,
+      totalPages,
+      cookie,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      filters: filtersSearchParams.toString(),
+    });
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    const userPrefsCookie = await userPrefs.serialize(cookie);
+    const headers = [setCookie(userPrefsCookie)];
+
+    return {
+      search,
+      totalItems: totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      items: assets,
+      totalPages,
+      cookie,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
+      modelName,
+      headers,
+    };
+  } catch (cause) {
     throw new ShelfError({
-      cause: cause,
-      message: cause?.message
-        ? cause.message
-        : "Something went wrong while getting available assets.",
-      label: "Assets",
+      cause,
+      label,
+      message: "Something went wrong while fetching assets",
     });
   }
 }

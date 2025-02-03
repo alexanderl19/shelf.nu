@@ -14,6 +14,7 @@ import {
 } from "~/components/shared/dropdown";
 
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
@@ -26,6 +27,7 @@ export function TeamUsersActionsDropdown({
   email,
   isSSO,
   customTrigger,
+  role,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
@@ -34,6 +36,7 @@ export function TeamUsersActionsDropdown({
   email: string;
   isSSO: boolean;
   customTrigger?: (disabled: boolean) => ReactNode;
+  role: UserFriendlyRoles;
 }) {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
@@ -57,7 +60,12 @@ export function TeamUsersActionsDropdown({
           {customTrigger ? (
             customTrigger(disabled)
           ) : (
-            <Button variant="tertiary" width="full" className="border-0 pr-0">
+            <Button
+              variant="tertiary"
+              width="full"
+              className="border-0 pr-0"
+              aria-label="Actions Trigger"
+            >
               {disabled ? <Spinner className="size-4" /> : <VerticalDotsIcon />}
             </Button>
           )}
@@ -80,6 +88,7 @@ export function TeamUsersActionsDropdown({
                 <input type="hidden" name="name" value={name} />
                 <input type="hidden" name="email" value={email} />
                 <input type="hidden" name="teamMemberId" value={teamMemberId} />
+                <input type="hidden" name="userFriendlyRole" value={role} />
                 <Button
                   type="submit"
                   variant="link"

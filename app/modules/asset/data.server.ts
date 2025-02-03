@@ -175,7 +175,7 @@ export async function simpleModeLoader({
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
       },
       totalCategories,
       totalTags,
@@ -219,7 +219,7 @@ export async function advancedModeLoader({
     filters,
     serializedCookie: filtersCookie,
     redirectNeeded,
-  } = await getAdvancedFiltersFromRequest(request, organizationId);
+  } = await getAdvancedFiltersFromRequest(request, organizationId, settings);
 
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -227,9 +227,12 @@ export async function advancedModeLoader({
     : getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
-  if (filters && redirectNeeded) {
+
+  if (redirectNeeded) {
     const cookieParams = new URLSearchParams(filters);
-    return redirect(`/assets?${cookieParams.toString()}`);
+    return redirect(`/assets?${cookieParams.toString()}`, {
+      headers: filtersCookie ? [setCookie(filtersCookie)] : undefined,
+    });
   }
 
   /** Query tierLimit, assets & Asset index settings */
@@ -354,7 +357,7 @@ export async function advancedModeLoader({
       searchFieldLabel: "Search by asset name",
       searchFieldTooltip: {
         title: "Search your asset database",
-        text: "Search assets based on asset name Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        text: "Search assets based on asset name. Separate your keywords by a comma(,) to search with OR condition. For example: searching 'Laptop, lenovo, 2020' will find assets matching any of these terms.",
       },
       filters,
       organizationId,

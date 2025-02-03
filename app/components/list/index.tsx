@@ -9,7 +9,6 @@ import {
 } from "~/atoms/list";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -66,7 +65,7 @@ export type ListProps = {
   className?: string;
   customEmptyStateContent?: {
     title: string;
-    text: string;
+    text: React.ReactNode;
     newButtonRoute?: string;
     newButtonContent?: string;
     buttonProps?: any;
@@ -79,6 +78,10 @@ export type ListProps = {
 
   /** Optionally recieve an element for custom pagination */
   customPagination?: React.ReactElement;
+  /** Any extra content to the right in Header */
+  headerExtraContent?: React.ReactNode;
+  /** Any extra props directly passed to ItemComponent */
+  extraItemComponentProps?: Record<string, unknown>;
 };
 
 /**
@@ -96,10 +99,11 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     emptyStateClassName,
     bulkActions,
     customPagination,
+    headerExtraContent,
+    extraItemComponentProps,
   }: ListProps,
   ref
 ) {
-  const { isMd } = useViewportHeight();
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
@@ -128,7 +132,6 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       ref={ref}
       className={tw(
         "-mx-4 border border-gray-200 bg-white md:mx-0 md:rounded",
-        customPagination && isMd && "mb-[34px]",
         modeIsAdvanced ? "flex h-full flex-col" : "overflow-auto",
         className
       )}
@@ -143,7 +146,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           {/* The title and the total number of items. This basically acts like a fake table row */}
           <div
             className={tw(
-              modeIsAdvanced ? "p-3 pb-[5px]" : "p-4 pb-[8px]",
+              modeIsAdvanced ? "p-3 pb-[5px]" : "p-4 pb-2",
               "flex items-center justify-between border-b "
             )}
           >
@@ -210,12 +213,11 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
               <When truthy={modeIsAdvanced}>
                 <ExportAssetsButton />
               </When>
-              <When truthy={!!bulkActions}>
-                <div>{bulkActions}</div>
-              </When>
+              <When truthy={!!bulkActions}>{bulkActions}</When>
             </div>
           </div>
           <Table
@@ -234,7 +236,10 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   navigate={navigate}
                 >
                   {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
-                  <ItemComponent item={item} />
+                  <ItemComponent
+                    item={item}
+                    extraProps={extraItemComponentProps}
+                  />
                 </ListItem>
               ))}
             </tbody>

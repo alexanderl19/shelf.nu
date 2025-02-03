@@ -1,15 +1,26 @@
 import { Roles } from "@prisma/client";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
-import { useAtom } from "jotai";
-// import { ClientOnly } from "remix-utils/client-only";
+import { Link, NavLink, Outlet, useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
+import { ScanBarcodeIcon } from "lucide-react";
+import { ClientOnly } from "remix-utils/client-only";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorContent } from "~/components/errors";
 
-// import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
-import Sidebar from "~/components/layout/sidebar/sidebar";
+import { InstallPwaPromptModal } from "~/components/layout/install-pwa-prompt-modal";
+import AppSidebar from "~/components/layout/sidebar/app-sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
+import { ShelfMobileLogo } from "~/components/marketing/logos";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { NoSubscription } from "~/components/subscription/no-subscription";
@@ -17,6 +28,7 @@ import { config } from "~/config/shelf.config";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/index.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   installPwaPromptCookie,
   initializePerPageCookieOnLayout,
@@ -34,6 +46,7 @@ import {
   stripe,
 } from "~/utils/stripe.server";
 import { canUseBookings } from "~/utils/subscription.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -129,11 +142,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+export const meta: MetaFunction<typeof loader> = ({ error }) => [
+  /** This will make sure that if we have an error its visible in the title of the browser tab */
+  // @ts-expect-error
+  { title: error ? appendToMetaTitle(error.data.error.title) : "" },
+];
+
 export default function App() {
   useCrisp();
-  const { currentOrganizationId, disabledTeamOrg } =
-    useLoaderData<typeof loader>();
-  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
+  const { disabledTeamOrg, minimizedSidebar } = useLoaderData<typeof loader>();
+  const workspaceSwitching = useAtomValue(switchingWorkspaceAtom);
 
   // const renderInstallPwaPromptOnMobile = () =>
   //   // returns InstallPwaPromptModal if the device width is lesser than 640px and the app is being accessed from browser not PWA
@@ -143,35 +161,45 @@ export default function App() {
   //   ) : null;
 
   return (
-    <>
-      <div
-        id="container"
-        key={currentOrganizationId}
-        className="flex h-screen max-h-screen min-h-screen min-w-[320px] flex-col"
-      >
-        <div className="inner-container flex flex-col md:flex-row">
-          <Sidebar />
-          <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
-            <div className="flex h-full flex-1 flex-col">
-              {disabledTeamOrg ? (
-                <NoSubscription />
-              ) : workspaceSwitching ? (
-                <div className="flex size-full flex-col items-center justify-center text-center">
-                  <Spinner />
-                  <p className="mt-2">Activating workspace...</p>
-                </div>
-              ) : (
-                <Outlet />
-              )}
-            </div>
-            <Toaster />
-            {/* <ClientOnly fallback={null}>
-              {renderInstallPwaPromptOnMobile}
-            </ClientOnly> */}
-          </main>
-        </div>
-      </div>
-    </>
+    <SidebarProvider defaultOpen={!minimizedSidebar}>
+      <AppSidebar />
+      <SidebarInset>
+        {disabledTeamOrg ? (
+          <NoSubscription />
+        ) : workspaceSwitching ? (
+          <div className="flex size-full flex-col items-center justify-center text-center">
+            <Spinner />
+            <p className="mt-2">Activating workspace...</p>
+          </div>
+        ) : (
+          <>
+            <header className="flex items-center justify-between border-b bg-white py-4 md:hidden">
+              <Link to="." title="Home" className="block h-8">
+                <ShelfMobileLogo />
+              </Link>
+              <div className="flex items-center space-x-2">
+                <NavLink
+                  to="/scanner"
+                  title="Scan QR Code"
+                  className={({ isActive }) =>
+                    tw(
+                      "relative flex items-center justify-center px-2 transition",
+                      isActive ? "text-primary-600" : "text-gray-500"
+                    )
+                  }
+                >
+                  <ScanBarcodeIcon />
+                </NavLink>
+                <SidebarTrigger />
+              </div>
+            </header>
+            <Outlet />
+          </>
+        )}
+        <Toaster />
+        <ClientOnly fallback={null}>{InstallPwaPromptModal}</ClientOnly>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 

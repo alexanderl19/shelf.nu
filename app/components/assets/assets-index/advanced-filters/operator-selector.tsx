@@ -5,6 +5,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import type { DisabledProp } from "~/components/shared/button";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils/tw";
 import type { Filter, FilterDefinition, FilterOperator } from "./schema";
@@ -25,7 +26,7 @@ function FilterOperatorDisplay({
 }
 
 /** Maps the FilterOperator to a user friendly name */
-const operatorsMap: Record<FilterOperator, string[]> = {
+export const operatorsMap: Record<FilterOperator, string[]> = {
   is: ["=", "is"],
   isNot: ["≠", "Is not"],
   contains: ["∋", "Contains"],
@@ -41,6 +42,7 @@ const operatorsMap: Record<FilterOperator, string[]> = {
   containsAny: ["⊃", "Contains any"],
   matchesAny: ["≈", "Matches any"],
   inDates: ["∈", "In dates"],
+  excludeAny: ["⊄", "Exclude any of"], // New operator with clear meaning for tag exclusion
 };
 
 // Define the allowed operators for each field type
@@ -51,16 +53,18 @@ export const operatorsPerType: FilterDefinition = {
   date: ["is", "isNot", "before", "after", "between", "inDates"],
   number: ["is", "isNot", "gt", "lt", "gte", "lte", "between"],
   enum: ["is", "isNot", "containsAny"],
-  array: ["contains", "containsAll", "containsAny"],
+  array: ["contains", "containsAll", "containsAny", "excludeAny"],
   customField: [], // empty array as customField operators are determined by the actual field type
 };
 
 export function OperatorSelector({
   filter,
   setFilter,
+  disabled,
 }: {
   filter: Filter;
   setFilter: (filter: Filter["operator"]) => void;
+  disabled?: DisabledProp;
 }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
@@ -79,6 +83,7 @@ export function OperatorSelector({
           variant="secondary"
           title={operatorsMap[operator][1]}
           className="w-[50px] font-normal"
+          disabled={disabled}
         >
           {operatorsMap[operator][0]}
         </Button>

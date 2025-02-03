@@ -7,12 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import {
-  useFetcher,
-  useFetchers,
-  useLoaderData,
-  useNavigate,
-} from "@remix-run/react";
+import { Link, useFetcher, useFetchers, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -22,6 +17,7 @@ import { AdvancedAssetRow } from "~/components/assets/assets-index/advanced-asse
 import { AdvancedTableHeader } from "~/components/assets/assets-index/advanced-table-header";
 import { AssetIndexPagination } from "~/components/assets/assets-index/asset-index-pagination";
 // eslint-disable-next-line import/no-cycle
+import AssetQuickActions from "~/components/assets/assets-index/asset-quick-actions";
 import { AssetIndexFilters } from "~/components/assets/assets-index/filters";
 import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
@@ -67,7 +63,6 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
-import { markSubstring } from "~/utils/mark-substring";
 import {
   PermissionAction,
   PermissionEntity,
@@ -248,7 +243,7 @@ export default function AssetIndexPage() {
   const { modeIsAdvanced } = useAssetIndexViewState();
 
   return (
-    <>
+    <div className="relative">
       <Header hidePageDescription={modeIsAdvanced}>
         <When
           truthy={userHasPermission({
@@ -272,7 +267,7 @@ export default function AssetIndexPage() {
         </When>
       </Header>
       <AssetsList />
-    </>
+    </div>
   );
 }
 
@@ -285,7 +280,6 @@ export const AssetsList = ({
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
 }) => {
-  const navigate = useNavigate();
   // We use the hook because it handles optimistic UI
   const { modeIsSimple } = useAssetIndexViewState();
   const { isMd } = useViewportHeight();
@@ -320,6 +314,7 @@ export const AssetsList = ({
         <Th>Custodian</Th>
       </When>
       <Th>Location</Th>
+      <Th>Actions</Th>
     </>
   ) : (
     <AdvancedTableHeader columns={columns} />
@@ -328,24 +323,23 @@ export const AssetsList = ({
   return (
     <div
       className={tw(
-        "flex h-full flex-col",
-        modeIsSimple ? "gap-4 pt-4" : "gap-2 pt-2"
+        "flex flex-col",
+        modeIsSimple ? "gap-4 pb-5 pt-4" : "gap-2 py-2"
       )}
     >
-      {isSwappingMode ? (
+      <When truthy={!!isSwappingMode}>
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ delay: 0.2 }}
-          className="absolute inset-[3px] z-[11] flex flex-col items-center border border-gray-200 bg-gray-25/95 pt-[200px]"
+          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-gray-25/95 pt-[200px]"
         >
           <Spinner />
           <p className="mt-2">Changing mode...</p>
         </motion.div>
-      ) : (
-        <></>
-      )}
+      </When>
+
       {!isMd && !modeIsSimple ? (
         <AdvancedModeMobileFallback />
       ) : (
@@ -357,14 +351,6 @@ export const AssetsList = ({
             title="Assets"
             ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
             customPagination={<AssetIndexPagination />}
-            /**
-             * Using remix's navigate is the default behaviour, however it can also receive a custom function
-             */
-            navigate={
-              modeIsSimple
-                ? (itemId) => navigate(`/assets/${itemId}`)
-                : undefined
-            }
             bulkActions={
               disableBulkActions || isBase ? undefined : <BulkActionsDropdown />
             }
@@ -386,7 +372,10 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
+        <Link
+          className="flex justify-between gap-3 p-4  md:justify-normal md:px-6"
+          to={`/assets/${item.id}`}
+        >
           <div className="flex items-center gap-3">
             <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
@@ -417,7 +406,7 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
-                {markSubstring(item.title)}
+                {item.title}
               </span>
               <div>
                 <AssetStatusBadge
@@ -427,7 +416,7 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
               </div>
             </div>
           </div>
-        </div>
+        </Link>
       </Td>
 
       {/* Category */}
@@ -437,8 +426,8 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
             {category.name}
           </Badge>
         ) : (
-          <Badge color={"#808080"} withDot={false}>
-            {"Uncategorized"}
+          <Badge color="#575757" withDot={false}>
+            Uncategorized
           </Badge>
         )}
       </Td>
@@ -492,6 +481,16 @@ const ListAssetContent = ({ item }: { item: AssetsFromViewItem }) => {
 
       {/* Location */}
       <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+
+      {/* Quick Actions */}
+      <Td>
+        <AssetQuickActions
+          asset={{
+            ...item,
+            qrId: item.qrCodes[0].id,
+          }}
+        />
+      </Td>
     </>
   );
 };

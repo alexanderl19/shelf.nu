@@ -24,7 +24,7 @@ import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { SMTP_FROM } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { isZodValidationError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -167,8 +167,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     if (config.sendOnboardingEmail) {
       /** Send onboarding email */
-      await sendEmail({
-        from: SMTP_FROM || `"Carlos from shelf.nu" <carlos@shelf.nu>`,
+      sendEmail({
+        from: SMTP_FROM || `"Carlos from shelf.nu" <carlos@emails.shelf.nu>`,
+        replyTo: "carlos@shelf.nu",
         to: user.email,
         subject: "🏷️ Welcome to Shelf - can I ask you a question?",
         text: onboardingEmailText({ firstName: user.firstName as string }),
@@ -195,7 +196,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       headers,
     });
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(
+      cause,
+      { userId },
+      !isZodValidationError(cause)
+    );
     return json(error(reason), { status: reason.status });
   }
 }

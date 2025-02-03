@@ -131,6 +131,7 @@ export async function getTeamMembers(params: {
   /** Assets to be loaded per page */
   perPage?: number;
   search?: string | null;
+  where?: Prisma.TeamMemberWhereInput;
 }) {
   const { organizationId, page = 1, perPage = 8, search } = params;
 
@@ -142,6 +143,7 @@ export async function getTeamMembers(params: {
     let where: Prisma.TeamMemberWhereInput = {
       deletedAt: null,
       organizationId,
+      ...params.where,
     };
 
     /** If the search string exists, add it to the where object */
@@ -182,9 +184,11 @@ export async function getTeamMembers(params: {
 export const getPaginatedAndFilterableTeamMembers = async ({
   request,
   organizationId,
+  where,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
+  where?: Prisma.TeamMemberWhereInput;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -198,6 +202,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
       page,
       perPage,
       search,
+      where,
     });
     const totalPages = Math.ceil(totalTeamMembers / perPage);
 
@@ -305,9 +310,17 @@ export async function getTeamMemberForCustodianFilter({
   }
 }
 
-export async function getTeamMember({ id }: { id: TeamMember["id"] }) {
+export async function getTeamMember({
+  id,
+  organizationId,
+}: {
+  id: TeamMember["id"];
+  organizationId: Organization["id"];
+}) {
   try {
-    return await db.teamMember.findUniqueOrThrow({ where: { id } });
+    return await db.teamMember.findUniqueOrThrow({
+      where: { id, organizationId },
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -392,18 +405,39 @@ async function fixTeamMembersNames(teamMembers: TeamMemberWithUserData[]) {
     if (teamMembersWithEmptyNames.length === 0) return;
 
     /**
-     * Itterate over the members and update them without awaiting
-     * Just in case we check again
+     * Updates team member names by:
+     * 1. Using first + last name if both exist
+     * 2. Using just first or last name if one exists
+     * 3. Falling back to email username if no name exists
+     * 4. Using "Unknown" as last resort if no email exists
      */
     await Promise.all(
       teamMembersWithEmptyNames.map((teamMember) => {
-        const name = teamMember.user
-          ? `${teamMember.user.firstName} ${teamMember.user.lastName}`
-          : "Unknown name";
-        return db.teamMember.update({
-          where: { id: teamMember.id },
-          data: { name },
-        });
+        let name: string;
+
+        if (teamMember.user) {
+          const { firstName, lastName, email } = teamMember.user;
+
+          if (firstName?.trim() || lastName?.trim()) {
+            // At least one name exists - concatenate available names
+            name = [firstName?.trim(), lastName?.trim()]
+              .filter(Boolean)
+              .join(" ");
+          } else {
+            // No names but email exists - use email username
+            name = email.split("@")[0];
+            // Optionally improve email username readability
+            name = name
+              .replace(/[._]/g, " ") // Replace dots/underscores with spaces
+              .replace(/\b\w/g, (c) => c.toUpperCase()); // Capitalize words
+          }
+
+          return db.teamMember.update({
+            where: { id: teamMember.id },
+            data: { name },
+          });
+        }
+        return null;
       })
     );
 
